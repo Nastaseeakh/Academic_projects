@@ -1,4 +1,4 @@
-""" Задание 2
+/* Задание 2
     2.1 Усердные ученики
 
 Образовательные курсы состоят из различных уроков, каждый из которых состоит из нескольких маленьких заданий. Каждое такое маленькое задание называется "горошиной".
@@ -13,8 +13,21 @@ subject	text	Дисциплина, в которой находится горо
 
 Необходимо написать оптимальный запрос, который даст информацию о количестве очень усердных студентов за март 2020 года.
 NB! Под усердным студентом мы понимаем студента, который правильно решил 20 задач за текущий месяц.
+*/
+    
+-- 2.1.
+SELECT COUNT(*) AS "Усердных учеников за март 2020 г."
+FROM
+    (--сводная таблица студент - кол-во правильно решенных горошин:
+    SELECT st_id, SUM(correct) AS correct_peas
+    FROM default.peas
+    WHERE
+        toStartOfMonth(timest) = '2020-03-01' -- в марте 2020
+    GROUP BY st_id
+    HAVING correct_peas >= 20) -- выбираем правильно решивших не менее 20 горошин
 
-2.2 Оптимизация воронки
+
+/*2.2 Оптимизация воронки
 
 Образовательная платформа предлагает пройти студентам курсы по модели trial: студент может решить бесплатно лишь 30 горошин в день. Для неограниченного количества заданий в определенной дисциплине студенту необходимо приобрести полный доступ. Команда провела эксперимент, где был протестирован новый экран оплаты.
 
@@ -35,41 +48,31 @@ subject	text 	Дисциплина, на которую приобрели по�
     ARPAU 
     CR в покупку 
     СR активного пользователя в покупку 
-    CR пользователя из активности по математике (subject = ’math’) в покупку курса по математике."""
+    CR пользователя из активности по математике (subject = ’math’) в покупку курса по математике.*/
     
--- 2.1.
-SELECT COUNT(*) AS "Усердных учеников за март 2020 г."
-FROM
-    SELECT st_id, SUM(correct) AS correct_peas
-    FROM peas
-    WHERE
-        toStartOfMonth(timest) = '2020-03-01'
-    GROUP BY st_id
-    HAVING correct_peas >= 20)
-
 -- 2.2.
-WITH user_data AS -- сводная таблица по пользователям с указанием группы, изучаемых и оплаченных курсов
-    (SELECT studs.st_id AS st_id,
-            studs.test_grp As group,
-            act.subjects_studied AS subjects_studied,
-            checksagg.revenue AS revenue,
-            checksagg.subjects_purchased AS subjects_purchased
-    FROM studs
-        LEFT JOIN (SELECT st_id, groupUniqArray(subject) AS subjects_studied
-                    FROM peas
+WITH user_data AS -- сводная таблица по пользователям
+    (SELECT DISTINCT studs.st_id AS st_id,          -- уникальные студенты
+            studs.test_grp As group,                -- принадлежность к группе
+            act.subjects_studied AS subjects_studied,  -- изученные курсы
+            checksagg.revenue AS revenue,              -- сумма оплат    
+            checksagg.subjects_purchased AS subjects_purchased  -- оплаченные курсы
+    FROM default.studs AS studs  -- все студенты
+        LEFT JOIN (SELECT st_id, groupUniqArray(subject) AS subjects_studied -- группируем изучаемые курсы по студентам
+                    FROM default.peas
                     GROUP BY st_id) AS act
             ON act.st_id == studs.st_id
-        LEFT JOIN (SELECT st_id, SUM(money) AS revenue, groupUniqArray(subject) AS subjects_purchased
-                    FROM checks
+        LEFT JOIN (SELECT st_id, SUM(money) AS revenue, groupUniqArray(subject) AS subjects_purchased --группируем купленные курсы по студентам
+                    FROM default.final_project_check
                     GROUP BY st_id) AS checksagg
             ON studs.st_id == checksagg.st_id)
 
 SELECT group, 
-        ROUND(SUM(revenue) / COUNT(st_id), 2) AS ARPU,
-        ROUND(SUM(revenue) / SUM(notEmpty(subjects_studied)), 2) AS ARPAU,
-        ROUND(SUM(notEmpty(subjects_purchased)) / COUNT(st_id) * 100, 2) AS CR_percent,
-        ROUND(SUM(notEmpty(subjects_purchased)) / SUM(notEmpty(subjects_studied)) * 100, 2) AS CR_active_percent,
-        ROUND(SUM(like(toString(subjects_purchased), '%math%')) / SUM(like(toString(subjects_studied), '%math%')) * 100, 2) AS CR_math_percent
+        SUM(revenue) / COUNT(st_id) AS ARPU,
+        SUM(revenue) / SUM(notEmpty(subjects_studied)) AS ARPAU,
+        countIf(notEmpty(subjects_purchased)) / COUNT(st_id) AS CR, -- считаем долю непустых массивов с купленными курсами в общем числе
+        countIf(notEmpty(subjects_purchased)) / SUM(notEmpty(subjects_studied)) AS CR_active, -- считаем долю непустых массивов с купленными курсами в числе непустых массивов изучаемых курсов
+        countIf(like(toString(subjects_purchased), '%Math%') AND like(toString(subjects_studied), '%Math%')) / countIf(like(toString(subjects_studied), '%Math%')) AS CR_math  -- доля изучающих и купивших курсы по математике в общем числе изучающих ее
 FROM user_data
 GROUP BY group
 ORDER BY group
